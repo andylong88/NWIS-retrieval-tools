@@ -1,3 +1,5 @@
+# Create a list of USGS site IDs and location coordinates for sites within a rectangular polygon.
+
 import requests
 import shapely.geometry as geom
 
@@ -83,3 +85,4 @@ with open(output_file, "w", encoding="utf-8") as f:
         f.write(f"{site_no},{lat},{lon}\n")
 
 print(f"Wrote {len(set(sites))} sites with NAD83 coordinates to {output_file}")
+
