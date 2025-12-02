@@ -1,3 +1,5 @@
+# Read the list of sites created by "find-sites-output.py" and retrieve selected data for those sites. 
+
 import pandas as pd
 from dataretrieval import nwis
 
@@ -87,3 +89,4 @@ if pcode_col not in out.columns:
 out_2 = out[out[pcode_col].isin(PCODES_TO_KEEP)].copy()
 out_2.to_csv(OUT_CSV2, index=False)
 print(f"Wrote {len(out_2)} rows to {OUT_CSV2}")
+
