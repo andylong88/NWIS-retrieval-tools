@@ -5,10 +5,10 @@ import shapely.geometry as geom
 
 # ---- USER INPUTS ----
 polygon_coords = [
-    (-120.5, 38.0),
-    (-120.0, 38.0),
-    (-120.0, 38.5),
-    (-120.5, 38.5),
+    (-122.2, 47.2),
+    (-122.0, 47.2),
+    (-122.0, 47.0),
+    (-122.2, 47.0),
 ]
 
 output_file = "find-sites-output.txt"
