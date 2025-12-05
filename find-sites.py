@@ -15,7 +15,7 @@ polygon_coords = [
     (-120.5, 38.5),    
 ]
 
-output_file = "find-sites-output.txt"
+output_file = "find-sites-output.csv"
 
 site_type = ""        # e.g. "GW" or "ST"; leave "" for all
 agency_code = "USGS"

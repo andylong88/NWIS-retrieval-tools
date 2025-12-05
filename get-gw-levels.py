@@ -6,17 +6,21 @@ from dataretrieval import nwis
 # -------------------------------------------------------------------
 # User inputs
 # -------------------------------------------------------------------
-SITES_FILE = "find-sites-output.txt"          # one USGS site_no per line
+SITES_FILE = "find-sites-output.csv"          # one USGS site_no per line
 OUT_CSV1    = "get-gw-levels-out.csv" # output file
 OUT_CSV2    = "get-gw-levels-out-NAVD88.csv" # output file
 START_DT   = None  # e.g., '1900-01-01' if you want a date range
 END_DT     = None  # e.g., '2100-01-01'
 
 # -------------------------------------------------------------------
-# Read site numbers from text file
+# Read site numbers from CSV (with header and extra columns)
 # -------------------------------------------------------------------
-with open(SITES_FILE) as f:
-    sites = [line.strip() for line in f if line.strip()]
+sites_df = pd.read_csv(SITES_FILE)  # file has columns: site_no, lat_nad83, lon_nad83
+if "site_no" not in sites_df.columns:
+    raise ValueError(f"'site_no' column not found in {SITES_FILE}")
+
+# Extract the site IDs as a simple Python list
+sites = sites_df["site_no"].astype(str).tolist()
 
 if not sites:
     raise ValueError(f"No site numbers found in {SITES_FILE}")
@@ -28,10 +32,12 @@ if not sites:
 # -------------------------------------------------------------------
 gw_kwargs = {
     "sites": sites,
-    "parameterCd": "62611"
+    "parameterCd": "62611",
 }
+
 if START_DT is not None:
     gw_kwargs["startDT"] = START_DT
+
 if END_DT is not None:
     gw_kwargs["endDT"] = END_DT
 
