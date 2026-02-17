@@ -48,10 +48,12 @@ gw_df = gw_result[0]  # first element is the DataFrame
 # Get site info, including land-surface elevation
 #   alt_va        = land-surface altitude (elevation)
 #   alt_datum_cd  = vertical datum for altitude (e.g., NAVD88)
+#   well_depth_va = well depth (ft below land surface; corresponds to param 72008)
 # -------------------------------------------------------------------
 site_result = nwis.get_info(sites=sites)
 site_df = site_result[0]
 
+# Land-surface elevation
 site_elev = (
     site_df[["site_no", "alt_va", "alt_datum_cd"]]
     .rename(columns={
@@ -60,10 +62,33 @@ site_elev = (
     })
 )
 
+# Try to grab well depth column from the site file.
+# Common naming is well_depth_va, but we search flexibly.
+well_depth_cols = [
+    c for c in site_df.columns
+    if "well_depth" in c.lower() or c.lower() == "well_depth_va"
+]
+
+if well_depth_cols:
+    wd_col = well_depth_cols[0]
+    site_well_depth = (
+        site_df[["site_no", wd_col]]
+        .rename(columns={wd_col: "well_depth"})
+    )
+else:
+    # No well depth in this sitefile; create an empty column
+    site_well_depth = pd.DataFrame(
+        {
+            "site_no": site_df["site_no"],
+            "well_depth": pd.NA,
+        }
+    )
+
 # -------------------------------------------------------------------
-# Merge elevation info into groundwater levels
+# Merge elevation and well depth info into groundwater levels
 # -------------------------------------------------------------------
 out = gw_df.merge(site_elev, on="site_no", how="left")
+out = out.merge(site_well_depth, on="site_no", how="left")
 
 # -------------------------------------------------------------------
 # OPTIONAL: Write to CSV with NAVD88 and also NGVD29 
