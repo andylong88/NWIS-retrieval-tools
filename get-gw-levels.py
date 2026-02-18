@@ -1,4 +1,5 @@
-# Read the list of sites created by "find-sites-output.py" and retrieve selected data for those sites. 
+# Read the list of sites created by "find-sites-output.py" and
+# retrieve selected groundwater-level data for those sites, in chunks.
 
 import pandas as pd
 from dataretrieval import nwis
@@ -6,64 +7,123 @@ from dataretrieval import nwis
 # -------------------------------------------------------------------
 # User inputs
 # -------------------------------------------------------------------
-SITES_FILE = "find-sites-output.csv"          # one USGS site_no per line
-OUT_CSV1    = "get-gw-levels-out.csv" # output file
-OUT_CSV2    = "get-gw-levels-out-NAVD88.csv" # output file
-START_DT   = None  # e.g., '1900-01-01' if you want a date range
-END_DT     = None  # e.g., '2100-01-01'
+
+SITES_FILE = "find-sites-output.csv"            # input from find-sites_Pierce.py
+OUT_CSV1   = "get-gw-levels-out.csv"           # optional full output
+OUT_CSV2   = "get-gw-levels-out-NAVD88.csv"    # filtered output
+START_DT   = None                              # e.g., '1900-01-01'
+END_DT     = None                              # e.g., '2100-01-01'
+
+# Break up the retrieval into smaller chunks to work around download size.
+# Chunk size is the number of sites downloaded in one chunck. 
+CHUNK_SIZE = 100   # adjust as needed to keep URL length reasonable
 
 # -------------------------------------------------------------------
-# Read site numbers from CSV (with header and extra columns)
+# Read site numbers from CSV
 # -------------------------------------------------------------------
-sites_df = pd.read_csv(SITES_FILE)  # file has columns: site_no, lat_nad83, lon_nad83
+
+sites_df = pd.read_csv(SITES_FILE)  # columns: site_no, lat_nad83, lon_nad83
 if "site_no" not in sites_df.columns:
     raise ValueError(f"'site_no' column not found in {SITES_FILE}")
 
-# Extract the site IDs as a simple Python list
 sites = sites_df["site_no"].astype(str).tolist()
-
 if not sites:
     raise ValueError(f"No site numbers found in {SITES_FILE}")
 
 # -------------------------------------------------------------------
-# Get groundwater levels for parameter 62611 (NAVD88, feet)
-#   Service: gwlevels
-#   Parameter: 62611 = groundwater level above NAVD88, feet
+# Helper: split list into chunks
 # -------------------------------------------------------------------
-gw_kwargs = {
-    "sites": sites,
-    "parameterCd": "62611",
-}
 
-if START_DT is not None:
-    gw_kwargs["startDT"] = START_DT
-
-if END_DT is not None:
-    gw_kwargs["endDT"] = END_DT
-
-gw_result = nwis.get_gwlevels(**gw_kwargs)
-gw_df = gw_result[0]  # first element is the DataFrame
+def chunks(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
 
 # -------------------------------------------------------------------
-# Get site info, including land-surface elevation
-#   alt_va        = land-surface altitude (elevation)
-#   alt_datum_cd  = vertical datum for altitude (e.g., NAVD88)
-#   well_depth_va = well depth (ft below land surface; corresponds to param 72008)
+# Helper: ensure a DataFrame has a 'site_no' column
 # -------------------------------------------------------------------
-site_result = nwis.get_info(sites=sites)
-site_df = site_result[0]
 
-# Land-surface elevation
+def ensure_site_no_col(df):
+    # If site_no already present, return as-is
+    if "site_no" in df.columns:
+        return df
+    # Otherwise, treat the index as the site number
+    df = df.reset_index()
+    first_col = df.columns[0]
+    if first_col != "site_no":
+        df = df.rename(columns={first_col: "site_no"})
+    return df
+
+# -------------------------------------------------------------------
+# Loop over chunks and retrieve data
+# -------------------------------------------------------------------
+
+gw_frames = []
+site_frames = []
+
+for site_chunk in chunks(sites, CHUNK_SIZE):
+    # Groundwater levels (parameter 62611 = NAVD88, feet)
+    gw_kwargs = {
+        "sites": site_chunk,
+        "parameterCd": "62611",
+    }
+    if START_DT is not None:
+        gw_kwargs["startDT"] = START_DT
+    if END_DT is not None:
+        gw_kwargs["endDT"] = END_DT
+
+    gw_result = nwis.get_gwlevels(**gw_kwargs)
+    gw_df_chunk = gw_result[0]
+    if not gw_df_chunk.empty:
+        gw_frames.append(gw_df_chunk)
+
+    # Site info
+    site_result = nwis.get_info(sites=site_chunk)
+    site_df_chunk = site_result[0]
+    if not site_df_chunk.empty:
+        site_frames.append(site_df_chunk)
+
+# -------------------------------------------------------------------
+# Concatenate chunks and standardize 'site_no'
+# -------------------------------------------------------------------
+
+if not gw_frames:
+    raise ValueError("No groundwater data returned for any site chunk.")
+
+gw_df = pd.concat(gw_frames, ignore_index=False)
+gw_df = ensure_site_no_col(gw_df)
+
+if not site_frames:
+    raise ValueError("No site-info data returned for any site chunk.")
+
+site_df = pd.concat(site_frames, ignore_index=False)
+site_df = ensure_site_no_col(site_df)
+
+# -------------------------------------------------------------------
+# Land-surface elevation and datum
+# -------------------------------------------------------------------
+
+# Some site-info records may lack alt_va or alt_datum_cd; select safely
+cols_for_elev = [c for c in ["site_no", "alt_va", "alt_datum_cd"] if c in site_df.columns]
+if len(cols_for_elev) < 2:
+    raise KeyError(
+        "Site-info frame is missing 'alt_va' or 'alt_datum_cd' columns needed "
+        "for land-surface elevation."
+    )
+
 site_elev = (
-    site_df[["site_no", "alt_va", "alt_datum_cd"]]
-    .rename(columns={
-        "alt_va": "land_surface_elev",
-        "alt_datum_cd": "land_surface_elev_datum"
-    })
+    site_df[cols_for_elev]
+    .rename(
+        columns={
+            "alt_va": "land_surface_elev",
+            "alt_datum_cd": "land_surface_elev_datum",
+        }
+    )
 )
 
-# Try to grab well depth column from the site file.
-# Common naming is well_depth_va, but we search flexibly.
+# -------------------------------------------------------------------
+# Well depth (if available)
+# -------------------------------------------------------------------
+
 well_depth_cols = [
     c for c in site_df.columns
     if "well_depth" in c.lower() or c.lower() == "well_depth_va"
@@ -85,28 +145,27 @@ else:
     )
 
 # -------------------------------------------------------------------
-# Merge elevation and well depth info into groundwater levels
+# Merge elevation and well depth into groundwater levels
 # -------------------------------------------------------------------
+
 out = gw_df.merge(site_elev, on="site_no", how="left")
 out = out.merge(site_well_depth, on="site_no", how="left")
 
 # -------------------------------------------------------------------
-# OPTIONAL: Write to CSV with NAVD88 and also NGVD29 
+# OPTIONAL: write full CSV (all parameters returned)
 # -------------------------------------------------------------------
-#out.to_csv(OUT_CSV1, index=False)
-#print(f"Wrote {len(out)} rows to {OUT_CSV1}")
 
+# out.to_csv(OUT_CSV1, index=False)
+# print(f"Wrote {len(out)} rows to {OUT_CSV1}")
 
 # -------------------------------------------------------------------
-# Create CSV with only parameter codes 62611 and 72019 (omit NGVD29)
+# Filter to parameter codes 62611 and 72019, then write final CSV
 # -------------------------------------------------------------------
+
 PCODES_TO_KEEP = ["62611", "72019"]
 
-# Some gwlevels outputs use 'parm_cd' for the parameter code column.
-# Adjust the column name here if your frame uses something different.
 pcode_col = "parm_cd"
 if pcode_col not in out.columns:
-    # Try alternate common names
     for alt in ["parameter_cd", "param_cd", "pcode"]:
         if alt in out.columns:
             pcode_col = alt
@@ -120,4 +179,3 @@ if pcode_col not in out.columns:
 out_2 = out[out[pcode_col].isin(PCODES_TO_KEEP)].copy()
 out_2.to_csv(OUT_CSV2, index=False)
 print(f"Wrote {len(out_2)} rows to {OUT_CSV2}")
-
